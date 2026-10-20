@@ -224,12 +224,6 @@ def normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-# tv.cctv.com/2026/10/20/VIDExxxx261020.shtml — the trailing digits echo the date
-SEGMENT_URL_RE = re.compile(
-    r"https://tv\.cctv\.com/(\d{4})/(\d{2})/(\d{2})/VIDE[A-Za-z0-9]+(\d{8})\.shtml"
-)
-
-
 def parse_day_index(html_text: str, day: date) -> list[dict]:
     """Return [{url, title}] for one day's broadcast page, in page order.
 
@@ -280,8 +274,8 @@ def parse_segment(html_text: str, fallback_title: str = "") -> tuple[str, str]:
 
 _CLASSIFY_BRIEF = ("联播快讯", "快讯", "新闻速览")
 _CLASSIFY_COVERAGE = ("纪实", "启示", "反响", "巡礼", "足迹", "新思想引领",
-                      "学习", "解读", "专家", "观察", "综述", "反响",
-                      "央视快评", "央视网评", "新华时评", "人民时评", "评论")
+                      "解读", "综述", "央视快评", "央视网评", "新华时评",
+                      "人民时评", "评论")
 _CLASSIFY_SYM = ("座谈会", "研讨", "论坛", "峰会", "会晤", "理事会", "大会",
                  "会议", "博览会", "开幕式")
 _CLASSIFY_DECREE = ("签署命令", "签署主席令", "通令", "任免", "免去",
@@ -341,7 +335,7 @@ def classify_type(title: str, content: str) -> str:
         return "talks"
     if any(k in t for k in ("会见", "接见", "会晤")):
         return "meeting"
-    if any(k in t for k in ("考察", "调研", "视察", "走访", "慰问")):
+    if any(k in t for k in ("考察", "调研", "视察", "走访", "看望", "慰问")):
         return "inspection"
     if any(k in t for k in _CLASSIFY_DELIBERATION):
         return "deliberation"
@@ -366,9 +360,6 @@ _COUNTERPART_PATTERNS = [
     re.compile(r"欢迎([^\s，。；：、]{2,20}?)(?:访华|来访|抵达|到访)"),
     re.compile(r"接受([^\s，。；：、]{2,20}?)(?:采访|专访)"),
 ]
-_COUNTERPART_STOPS = ("会议", "论坛", "组织", "峰会", "代表团", "外长", "总统",
-                      "总理", "国王", "首相", "主席", "议长", "秘书长",
-                      "国际", "联合国", "使节", "客人")
 _COUNTERPART_VERBS = ("出席", "主持", "举行", "召开", "参加", "发表", "强调",
                       "表示", "指出", "认为", "说", "说，", "会见", "会谈")
 
@@ -683,13 +674,26 @@ def build_outputs(
     for r in records:
         tr = translations.get(r["id"], {})
         if r["id"] in rows:
-            # A row published before its translation landed (API hiccup) still
-            # needs its English fields; fill them in without touching the
-            # rest of the row. Archive rows are never affected.
+            # Rows this scanner produced are re-classifiable (the rules get
+            # tuned); the 2016-2026 archive rows are never touched. English
+            # fields are filled in whenever the translation cache catches up.
             existing = rows[r["id"]]
+            updated = False
             if tr.get("title_en") and not existing[5]:
                 existing[5] = tr["title_en"]
                 existing[6] = tr.get("summary_en", "")
+                updated = True
+            if r["type"] != existing[2]:
+                existing[2] = r["type"]
+                existing[3] = 1 if r["type"] in ACTIVE_TYPES else 0
+                updated = True
+            for col, val in ((7, ",".join(r.get("leaders") or [])),
+                             (8, ",".join(r.get("mentions") or [])),
+                             (9, r.get("counterpart", ""))):
+                if val and val != existing[col]:
+                    existing[col] = val
+                    updated = True
+            if updated:
                 n_refilled += 1
             continue
         rows[r["id"]] = [

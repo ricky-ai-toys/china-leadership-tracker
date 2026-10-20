@@ -172,6 +172,37 @@ class TestMergeBuild(unittest.TestCase):
             self.assertEqual(rows["20260803-00"][6], "Late summary.")
             self.assertEqual(rows["20260803-00"][4], "t")  # zh untouched
 
+    def test_own_row_is_reclassified(self):
+        records = [{
+            "id": "20260803-00", "date": "2026-08-03", "title_zh": "蔡奇看望慰问专家",
+            "url": "u", "content_zh": "c", "type": "coverage",
+            "counterpart": "", "location": "", "leaders": ["cai-qi"], "mentions": [],
+        }]
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            xb.build_outputs(records, {}, out)
+            records[0]["type"] = "inspection"          # rules tuned later
+            xb.build_outputs(records, {}, out)
+            rows = {r[0]: r for r in json.loads(
+                (out / "index.json").read_text(encoding="utf-8"))["events"]}
+            self.assertEqual(rows["20260803-00"][2], "inspection")
+            self.assertEqual(rows["20260803-00"][3], 1)
+
+    def test_archive_row_is_never_rewritten(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            self._seed_published(out)
+            before = json.loads((out / "index.json").read_text(encoding="utf-8"))
+            xb.build_outputs([{
+                "id": "20260803-00", "date": "2026-08-03", "title_zh": "新行",
+                "url": "u", "content_zh": "c", "type": "meeting",
+                "counterpart": "", "location": "", "leaders": [], "mentions": [],
+            }], {}, out)
+            after = json.loads((out / "index.json").read_text(encoding="utf-8"))
+            old_rows = [r for r in after["events"] if r[0] == "20260802-00"]
+            self.assertEqual(old_rows, [r for r in before["events"]
+                                         if r[0] == "20260802-00"])
+
     def test_idempotent(self):
         records = [{
             "id": "20260803-00", "date": "2026-08-03", "title_zh": "t",
