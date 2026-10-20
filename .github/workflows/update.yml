@@ -41,6 +41,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Always build on the newest main: a dispatch can happen while the
+          # previous run is still committing, and github.sha would then point
+          # at a stale tree (published meta.json, records.jsonl).
+          ref: main
 
       - uses: actions/setup-python@v6
         with:
