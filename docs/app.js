@@ -25,6 +25,7 @@ const state = {
   typeLabels: {},
   meta: {},
   rmrbMeta: {},
+  range: null,
   filtered: [],
   monthCounts: new Map(),
   shown: 0,
@@ -32,6 +33,30 @@ const state = {
   pageSize: 50,
   yearDetail: {},
 };
+
+// Combined data range across ALL sources (xwlb meta + rmrb meta + the
+// events actually loaded). The UI lets you browse every event, so filter
+// bounds must cover all of them — using the xwlb meta alone pins the "to"
+// date to the main pipeline's last successful day (e.g. stuck at 2026-08-02)
+// even though rmrb data runs through today.
+function dataRange() {
+  let first = null;
+  let last = null;
+  const grow = (d) => {
+    if (!d || d.length !== 10) return;
+    if (first === null || d < first) first = d;
+    if (last === null || d > last) last = d;
+  };
+  for (const m of [state.meta, state.rmrbMeta]) {
+    if (!m) continue;
+    grow(m.first_date);
+    grow(m.last_date);
+  }
+  for (const e of state.events) grow(e.date);
+  if (first === null) first = state.meta.first_date;
+  if (last === null) last = state.meta.last_date;
+  return { first, last };
+}
 
 /* ---------------- theme ---------------- */
 function initTheme() {
@@ -185,11 +210,12 @@ function buildFilters() {
     o.textContent = `${(state.typeLabels[t] || t).toUpperCase()} (${typeCounts[t].toLocaleString()})`;
     typeSel.appendChild(o);
   }
-  for (const [sel, def] of [["#f-date-from", state.meta.first_date],
-                            ["#f-date-to", state.meta.last_date]]) {
+  state.range = dataRange();
+  for (const [sel, def] of [["#f-date-from", state.range.first],
+                            ["#f-date-to", state.range.last]]) {
     const el = $(sel);
-    el.min = state.meta.first_date;
-    el.max = state.meta.last_date;
+    el.min = state.range.first;
+    el.max = state.range.last;
     el.value = def;
   }
   let deb;
@@ -208,8 +234,8 @@ async function applyFilters() {
   const q = $("#f-search").value.trim().toLowerCase();
   const leader = $("#f-leader").value;
   const type = $("#f-type").value;
-  const d0 = $("#f-date-from").value || state.meta.first_date;
-  const d1 = $("#f-date-to").value || state.meta.last_date;
+  const d0 = $("#f-date-from").value || state.range.first;
+  const d1 = $("#f-date-to").value || state.range.last;
   const mode = switchOn($("#f-mention")) ? "mention"
              : switchOn($("#f-fulltext")) ? "fulltext" : "actor";
   const source = switchOn($("#f-src-xwlb")) ? "xwlb"
@@ -865,8 +891,8 @@ function exportXlsx() {
       'Target="worksheets/sheet1.xml"/></Relationships>' },
     { name: "xl/worksheets/sheet1.xml", text: sheetXml(rows) },
   ];
-  const d0 = $("#f-date-from").value || state.meta.first_date;
-  const d1 = $("#f-date-to").value || state.meta.last_date;
+  const d0 = $("#f-date-from").value || state.range.first;
+  const d1 = $("#f-date-to").value || state.range.last;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(zipStore(files));
   a.download = `china-leadership-tracker_${d0}_${d1}.xlsx`;
