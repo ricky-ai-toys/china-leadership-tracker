@@ -169,9 +169,10 @@ class TestCheckedState(unittest.TestCase):
     def test_plan_missing_dates(self):
         since = date(2026, 7, 1)
         today = date(2026, 7, 4)
+        now = datetime.now(timezone.utc)
         checked = {
-            "2026-07-02": "2026-08-03T00:00:00+00:00",
-            "2026-07-03": "2020-01-01T00:00:00+00:00",
+            "2026-07-02": (now - timedelta(days=2)).isoformat(),  # fresh -> skip
+            "2026-07-03": (now - timedelta(days=8)).isoformat(),  # stale -> retry
         }
         known = {"2026-07-01"}
         missing = rb.plan_missing_dates(since, today, known, checked, 7, 10)

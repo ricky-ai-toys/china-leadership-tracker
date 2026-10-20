@@ -1,6 +1,6 @@
 # China Leadership Tracker 新闻联播·人民日报数据库
 
-**Live site: https://nelsonwang222.github.io/china-leadership-tracker/**
+**Live site: https://ricky-ai-toys.github.io/china-leadership-tracker/**
 
 A searchable, English-language database of Chinese leaders' public activities,
 meetings, and policy events, built from the full text of CCTV's *Xinwen Lianbo*
@@ -47,19 +47,20 @@ framework) and the daily-update workflows. Search, filters, the chart, and the
 network graph are all computed client-side from `docs/data/index.json` plus
 `docs/data/rmrb/index.json`; full transcripts load per-year on demand.
 
-The XWLB scraper/extraction/translation pipeline and the raw transcript
-archive live in a separate private repo (`china-leadership-tracker-pipeline`):
+The XWLB scanner is self-contained in this repo (`scripts/xwlb_build.py`):
 
 ```
-CCTV (tv.cctv.com/lm/xwlb) ── fetch ──▶ raw JSONL archive (private repo)
-                                            │
-                     extract  (roster of ~58 elite figures; 17 event types
-                     via ordered keyword rules; actor-vs-mention semantics)
-                                            │
-                     translate  (Gemini or Claude API, cached —
-                     each event translated once)
-                                            │
-                     build ──▶ docs/data/*.json  (published to THIS repo)
+CCTV (tv.cctv.com/lm/xwlb/day/YYYYMMDD.shtml)
+        │ fetch: one day page + every segment page (title + full transcript)
+        ▼
+      xwlb/records.jsonl (raw, append-only)
+        │ extract: 17 event types via ordered keyword rules; roster of
+        │ ~58 elite figures; actor-vs-mention semantics; counterpart
+        │ translate: Gemini / Claude / DeepSeek, cached in
+        │           xwlb/translations.jsonl (each segment translated once)
+        ▼
+   docs/data/*.json  (published in THIS repo — new days are MERGED into the
+   published index/shards, the 2016-2026 archive rows are never rewritten)
 ```
 
 The People's Daily front-page scanner is self-contained in this repo
@@ -81,10 +82,11 @@ People's Daily e-paper (paper.people.com.cn/rmrb/pc)
 ## Daily updates
 
 - `.github/workflows/update.yml` runs twice daily (22:30 and 07:30 Beijing
-  time) for XWLB: it checks out the private pipeline repo, fetches any
-  missing broadcast days (self-healing — a failed run is caught by the next),
-  translates new events, commits the data back to the pipeline repo, and
-  publishes the rebuilt `docs/data/` here.
+  time) for XWLB: it runs `scripts/xwlb_build.py`, which fetches any missing
+  broadcast days straight from tv.cctv.com (self-healing — a failed run is
+  caught by the next), translates new segments, merges them into the published
+  `docs/data/` files, and commits the result here. It writes only `xwlb/` and
+  `docs/data/{index.json,meta.json,events-YYYY.json}`.
 - `.github/workflows/rmrb.yml` runs twice daily (05:30 and 23:30 Beijing time)
   for People's Daily: it fetches any missing front pages since 2026-07-01,
   extracts articles, translates new rows, and publishes
@@ -105,10 +107,10 @@ secret is set (this repo → Settings → Secrets and variables → Actions):
   `DEEPSEEK_API_KEY` (DeepSeek, default `deepseek-chat`). Precedence:
   Claude > Gemini > DeepSeek. Override any model with `TRANSLATE_MODEL`;
   DeepSeek's model can also be set with `DEEPSEEK_MODEL`.
-- XWLB runs translate a batch of untranslated events, newest first, and cache
-  results — an event is only ever translated once. The People's Daily run has
-  its own `rmrb_translate_limit` input (default 300) and caches in
-  `rmrb/translations.jsonl`.
+- XWLB runs translate a batch of untranslated segments, newest first, and cache
+  results in `xwlb/translations.jsonl` — a segment is only ever translated
+  once. The People's Daily run has its own `rmrb_translate_limit` input
+  (default 300) and caches in `rmrb/translations.jsonl`.
 - Manual runs: Actions → "Daily update" / "People's Daily front-page update"
   → Run workflow, with a custom `translate_limit` / `rmrb_translate_limit`
   (0 skips translation).
@@ -119,13 +121,15 @@ secret is set (this repo → Settings → Secrets and variables → Actions):
 python -m http.server -d docs 8000
 ```
 
-The site is fully static; edit `docs/` and refresh. Regenerating XWLB data
-requires the private pipeline repo; regenerating People's Daily data is local:
+The site is fully static; edit `docs/` and refresh. Both data feeds can be
+regenerated locally:
 
 ```sh
-python scripts/rmrb_build.py --dry-run        # rebuild from existing records
+python scripts/xwlb_build.py --dry-run        # rebuild XWLB from existing records
+python scripts/xwlb_build.py --no-translate   # fetch new broadcasts, no LLM
+python scripts/rmrb_build.py --dry-run        # rebuild People's Daily from records
 python scripts/rmrb_build.py --no-translate   # fetch new front pages, no LLM
-python scripts/tests/test_rmrb_build.py       # run the parser/build tests
+python -m unittest discover -s scripts/tests   # run both parser/build test suites
 ```
 
 See `CLAUDE.md` for architecture notes, operational gotchas, and lessons

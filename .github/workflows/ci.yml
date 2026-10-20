@@ -13,6 +13,7 @@ on:
       - "docs/style.css"
       - ".github/workflows/ci.yml"
       - ".github/workflows/rmrb.yml"
+      - ".github/workflows/update.yml"
   pull_request:
     paths:
       - "scripts/**"
@@ -21,6 +22,7 @@ on:
       - "docs/style.css"
       - ".github/workflows/ci.yml"
       - ".github/workflows/rmrb.yml"
+      - ".github/workflows/update.yml"
 
 permissions:
   contents: read

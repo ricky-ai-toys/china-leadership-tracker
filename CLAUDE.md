@@ -4,29 +4,36 @@ Public, daily-updating database of Chinese leaders' activities built from CCTV
 *Xinwen Lianbo* transcripts and People's Daily front pages. Live site: https://nelsonwang222.github.io/china-leadership-tracker/
 (GitHub Pages from `docs/` on `main`). Owner: nelsonwang222.
 
-**Split-repo setup (since 2026-07-05):** this repo holds only the static site
-(`docs/`) and the update workflow. The pipeline and raw data live in the
-private repo `nelsonwang222/china-leadership-tracker-pipeline` — see its
-CLAUDE.md for pipeline architecture and scraping/translation lessons.
+**Single-repo setup (since 2026-10-20):** this repo holds the static site
+(`docs/`), the update workflows, and BOTH data pipelines. The XWLB pipeline
+used to live in the private repo `nelsonwang222/china-leadership-tracker-
+pipeline`; that repo became unreachable (every checkout fails with 404), the
+daily job failed every night, and the dataset froze at 2026-08-02. The
+scanner was rebuilt here as `scripts/xwlb_build.py` (stdlib only, same shape
+as `scripts/rmrb_build.py`) and `update.yml` now runs it in-repo.
 
 ## Architecture
 
 ```
 docs/                 vanilla HTML/CSS/JS site — no build step, no framework
 docs/data/            built JSON published by the workflow (index, leaders,
-                      per-year event shards, meta)
-.github/workflows/update.yml  runs the private pipeline, publishes docs/data/
+                      per-year event shards, meta) + docs/data/rmrb/* (People's
+                      Daily feed, owned by rmrb.yml)
+scripts/xwlb_build.py CCTV Xinwen Lianbo scanner (XWLB feed)
+scripts/rmrb_build.py People's Daily front-page scanner (RMRB feed)
+xwlb/                 XWLB raw records + translation cache (append-only)
+rmrb/                 RMRB raw records + translation cache (append-only)
+.github/workflows/update.yml  runs scripts/xwlb_build.py, publishes docs/data/
+.github/workflows/rmrb.yml    runs scripts/rmrb_build.py, publishes docs/data/rmrb/
 .github/workflows/pages.yml   deploys docs/ to Pages (push to docs/** or
-                              called from update.yml)
+                              called from update.yml / rmrb.yml)
 ```
 
-The workflow runs HERE (public repos get free unlimited Actions minutes;
-private repos are metered) and checks out the pipeline repo with a write
-deploy key stored as secret `PIPELINE_DEPLOY_KEY`. Translation secrets
-(`GEMINI_API_KEY` / `ANTHROPIC_API_KEY`) and the `TRANSLATE_MODEL` var also
-live in THIS repo's settings. Data commits go back to the pipeline repo;
-`docs/data/*.json` commits land here. Because the workflow is public, so are
-its run logs (event titles, counts, cadence) — keep pipeline stdout modest.
+Both scanners run HERE (public repos get free unlimited Actions minutes) and
+share the translation secrets (`GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
+`DEEPSEEK_API_KEY`, plus the `TRANSLATE_MODEL` / `DEEPSEEK_MODEL` vars) in
+THIS repo's settings. Because the workflows are public, so are their run logs
+(event titles, counts, cadence) — keep pipeline stdout modest.
 
 The 2016–present archive is fully translated as of 2026-07-05 (19,760/19,760);
 routine runs only fetch/translate new broadcasts and take minutes, not hours.
@@ -70,12 +77,39 @@ Key frontend facts (state as of 2026-07-08):
   --muted/--faint/--accent`, dark default + light via `html[data-theme]`);
   fonts Newsreader + IBM Plex Mono from Google Fonts.
 
+## XWLB source (since 2026-10-20, in-repo)
+
+`scripts/xwlb_build.py` rebuilds the CCTV feed without the private pipeline
+repo. Facts worth preserving:
+
+- Day pages are `tv.cctv.com/lm/xwlb/day/YYYYMMDD.shtml`; each anchors to
+  its segments at `tv.cctv.com/YYYY/MM/DD/VIDE*.shtml`. The first entry of a
+  day page is the full-episode player (《新闻联播》 YYYYMMDD 19:00) - it has
+  NO transcript, so it is excluded from the segment count.
+- A segment page carries the title in `<title>` (prefixed `[视频]`) and the
+  full transcript in `<div class="content_area" id="content_area"><p>…</p>`;
+  the text ends at the `京ICP备` footer. ~11-13 segments per day.
+- New days are MERGED into the published `docs/data/{index.json,meta.json,
+  events-YYYY.json}` - existing rows are never rewritten or dropped (the
+  builder loads the published index, adds only ids it doesn't have, and
+  recomputes meta). Never write `docs/data/rmrb/**` from here.
+- Event-type classification is keyword-based and was tuned against the
+  2016-2026 archive's own type distribution: 出席+会议/年会/论坛 -> ceremony,
+  主持+会议/学习 -> chaired_meeting, 会晤 -> meeting, incoming visits
+  (访华/对中国) -> visit_to_china, outgoing (将对/将赴/将访问) -> foreign_trip.
+  Re-check the archive with a `Counter` over `index.json` before changing a rule.
+- New ids are `YYYYMMDD-NN` per day, so they never collide with the archive's
+  ids. One row per segment (the old pipeline merged some segments), so daily
+  event counts from 2026-10-20 onward are ~11-13, not ~4.
+- State: `xwlb/records.jsonl` (raw), `xwlb/translations.jsonl` (cache),
+  `xwlb/checked.json` (empty-date memory, TTL 7 days, today never tombstoned).
+- Translation reuses the rmrb providers; precedence Claude > Gemini > DeepSeek.
+
 ## People's Daily front-page source (since 2026-08)
 
 `scripts/rmrb_build.py` is a self-contained, stdlib-only scanner for the
-People's Daily e-paper front page (paper.people.com.cn/rmrb/pc). It is the
-only data-generating code that lives in this public repo - the XWLB pipeline
-stays private. Facts worth preserving:
+People's Daily e-paper front page (paper.people.com.cn/rmrb/pc). Facts worth
+preserving:
 
 - The free e-paper PC layout archive starts 2024-12-01; older interfaces
   return 403 to automated clients. The scanner backfills from 2026-07-01
@@ -175,3 +209,13 @@ stays private. Facts worth preserving:
     Python zipfile + ElementTree, not by eyeballing.
 
 - Two write workflows on one repo: keep them on disjoint paths (XWLB: docs/data/index.json + events-YYYY.json; RMRB: rmrb/ + docs/data/rmrb/). Same `git pull --rebase -X theirs` retry pattern; conflicts should never arise.
+13. **A failing scheduled job hides behind "it still updates"**: update.yml
+    failed nightly for ~11 weeks (private pipeline repo 404) while rmrb.yml
+    kept publishing, so the site looked alive but the XWLB feed was frozen.
+    Check `gh api repos/.../actions/workflows/<file>/runs` for `conclusion`
+    before assuming a feed is current - and prefer a pipeline that lives in
+    the same repo as its data so one dead dependency cannot freeze a feed.
+14. **Never hardcode one data source's meta in the frontend**: app.js pinned
+    the date filter to `meta.last_date` of a single feed, so the "To" date
+    stopped at 2026-08-02 even though rmrb data ran to the present. Compute
+    filter bounds as the union of every feed's meta AND the loaded events.
