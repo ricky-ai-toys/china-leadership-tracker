@@ -153,6 +153,25 @@ class TestMergeBuild(unittest.TestCase):
             self.assertEqual(meta["first_date"], "2026-08-02")  # min over merged rows
             self.assertEqual(meta["last_date"], "2026-08-03")
 
+    def test_untranslated_row_is_refilled(self):
+        records = [{
+            "id": "20260803-00", "date": "2026-08-03", "title_zh": "t",
+            "url": "u", "content_zh": "c", "type": "brief",
+            "counterpart": "", "location": "", "leaders": [], "mentions": [],
+        }]
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            xb.build_outputs(records, {}, out)          # published untranslated
+            xb.build_outputs(records, {
+                "20260803-00": {"id": "20260803-00", "title_en": "Late EN",
+                                "summary_en": "Late summary."},
+            }, out)                                      # translation lands later
+            rows = {r[0]: r for r in json.loads(
+                (out / "index.json").read_text(encoding="utf-8"))["events"]}
+            self.assertEqual(rows["20260803-00"][5], "Late EN")
+            self.assertEqual(rows["20260803-00"][6], "Late summary.")
+            self.assertEqual(rows["20260803-00"][4], "t")  # zh untouched
+
     def test_idempotent(self):
         records = [{
             "id": "20260803-00", "date": "2026-08-03", "title_zh": "t",

@@ -679,10 +679,19 @@ def build_outputs(
     types_map = dict(TYPE_LABELS)
     types_map.update(labels)
     n_new = 0
+    n_refilled = 0
     for r in records:
-        if r["id"] in rows:
-            continue
         tr = translations.get(r["id"], {})
+        if r["id"] in rows:
+            # A row published before its translation landed (API hiccup) still
+            # needs its English fields; fill them in without touching the
+            # rest of the row. Archive rows are never affected.
+            existing = rows[r["id"]]
+            if tr.get("title_en") and not existing[5]:
+                existing[5] = tr["title_en"]
+                existing[6] = tr.get("summary_en", "")
+                n_refilled += 1
+            continue
         rows[r["id"]] = [
             r["id"], r["date"], r["type"],
             1 if r["type"] in ACTIVE_TYPES else 0,
@@ -723,9 +732,9 @@ def build_outputs(
     with (out_dir / "meta.json").open("w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
     print(
-        f"Built docs/data: {meta['n_events']} events (+{n_new} new), "
-        f"{meta['n_days']} days, {meta['n_translated']} translated, "
-        f"last_date {meta['last_date']}"
+        f"Built docs/data: {meta['n_events']} events (+{n_new} new, "
+        f"{n_refilled} refilled), {meta['n_days']} days, "
+        f"{meta['n_translated']} translated, last_date {meta['last_date']}"
     )
 
 
